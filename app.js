@@ -1,13 +1,13 @@
-const $=(s,p=document)=>p.querySelector(s), $$=(s,p=document)=>[...p.querySelectorAll(s)];
+const $=(s,p=document)=>p.querySelector(s),$$=(s,p=document)=>[...p.querySelectorAll(s)];
 const scenes=$$('.scene');
+const AUDIO_BASE='https://raw.githubusercontent.com/phatexz/bong-khoai-love-story/9bc3c499f9b89aff3d38795257f161c5975b0d04/assets/audio';
 const PARTS={
- 1:{name:'Phần I · Mùa áo trắng',tracks:['assets/audio/1.mp3','1.mp3'],label:'1.mp3',anchor:'#part1'},
- 2:{name:'Phần II · Những năm mình lớn',tracks:['assets/audio/2.mp3','2.mp3'],label:'2.mp3',anchor:'#part2'},
- 3:{name:'Phần III · Về chung một nhà',tracks:['assets/audio/3.mp3','3.mp3'],label:'3.mp3',anchor:'#part3'}
+ 1:{name:'Phần I · Mùa áo trắng',track:`${AUDIO_BASE}/1.mp3`,label:'1.mp3',anchor:'#part1'},
+ 2:{name:'Phần II · Những năm mình lớn',track:`${AUDIO_BASE}/2.mp3`,label:'2.mp3',anchor:'#part2'},
+ 3:{name:'Phần III · Về chung một nhà',track:`${AUDIO_BASE}/3.mp3`,label:'3.mp3',anchor:'#part3'}
 };
-const music=$('#music'), audioBtn=$('#audioBtn'), trackPill=$('#trackPill'), partLabel=$('#partLabel');
-let audioOn=false,currentPart=1,currentScene=0,rafId=0,isSwitching=false,pendingPart=null;
-let fadeTimer=null;
+const music=$('#music'),audioBtn=$('#audioBtn'),trackPill=$('#trackPill'),partLabel=$('#partLabel');
+let audioOn=false,currentPart=1,currentScene=0,isSwitching=false,pendingPart=null,fadeTimer=null;
 
 function clamp(v,a=0,b=1){return Math.max(a,Math.min(b,v))}
 function smooth(t){t=clamp(t);return t*t*(3-2*t)}
@@ -21,7 +21,6 @@ function setTrackUI(part,status=''){
   b.setAttribute('aria-current',on?'true':'false');
  });
 }
-
 function fadeVolume(to,duration=420,done){
  clearInterval(fadeTimer);
  const from=music.volume,steps=18;
@@ -32,75 +31,51 @@ function fadeVolume(to,duration=420,done){
   if(n>=steps){clearInterval(fadeTimer);music.volume=to;done&&done()}
  },duration/steps);
 }
-
-async function resolveTrack(part){
+async function replaceTrack(part){
  const cfg=PARTS[part];
- for(const src of cfg.tracks){
+ music.pause();
+ music.src=cfg.track;
+ music.dataset.part=String(part);
+ music.volume=0;
+ music.load();
+ setTrackUI(part,`Đang tải: ${cfg.label}`);
+ if(audioOn){
   try{
-   const r=await fetch(src,{method:'HEAD',cache:'no-store'});
-   if(r.ok)return src;
-  }catch(e){}
+   await music.play();
+   fadeVolume(.72,520);
+  }catch(e){
+   setTrackUI(part,`Chạm lại Âm thanh để phát ${cfg.label}`);
+   audioOn=false;
+   audioBtn.classList.remove('on');
+   audioBtn.setAttribute('aria-pressed','false');
+  }
  }
- return null;
 }
-
 async function loadPartTrack(part,force=false){
  if(isSwitching){pendingPart=part;return}
  const cfg=PARTS[part];
  if(!cfg)return;
- const same=music.dataset.part===String(part);
- if(same&&!force){setTrackUI(part);return}
+ if(music.dataset.part===String(part)&&!force){setTrackUI(part);return}
  isSwitching=true;
-
- const replace=async()=>{
-  music.pause();
-  music.removeAttribute('src');
-  music.load();
-  music.volume=0;
-
-  const src=await resolveTrack(part);
-  if(!src){
-   music.dataset.part='';
-   setTrackUI(part,`Chưa có nhạc: ${cfg.label}`);
-   isSwitching=false;
-   if(pendingPart&&pendingPart!==part){const next=pendingPart;pendingPart=null;loadPartTrack(next)}else pendingPart=null;
-   return;
-  }
-
-  music.src=src;
-  music.dataset.part=String(part);
-  music.dataset.src=src;
-  music.load();
-  setTrackUI(part,`Nhạc: ${cfg.label}`);
-
-  if(audioOn){
-   try{await music.play();fadeVolume(.72,520)}
-   catch(e){setTrackUI(part,`Chạm lại Âm thanh để phát ${cfg.label}`)}
-  }
-
+ const run=async()=>{
+  await replaceTrack(part);
   isSwitching=false;
   if(pendingPart&&pendingPart!==part){const next=pendingPart;pendingPart=null;loadPartTrack(next)}else pendingPart=null;
  };
-
- if(!music.paused&&music.volume>.02)fadeVolume(0,300,replace);else replace();
+ if(!music.paused&&music.volume>.02)fadeVolume(0,260,run);else run();
 }
-
 function enableAudio(on){
  audioOn=on;
  audioBtn.classList.toggle('on',on);
  audioBtn.setAttribute('aria-pressed',on?'true':'false');
  if(on)loadPartTrack(currentPart,true);
- else{fadeVolume(0,220,()=>music.pause());setTrackUI(currentPart)}
+ else fadeVolume(0,220,()=>{music.pause();setTrackUI(currentPart)});
 }
 
-music.addEventListener('error',()=>{
- const cfg=PARTS[currentPart];
- trackPill.textContent=`Không tải được nhạc: ${cfg.label}`;
-});
-music.addEventListener('playing',()=>{
- trackPill.textContent=`Đang phát: ${PARTS[currentPart].label}`;
-});
-music.addEventListener('ended',()=>{if(audioOn)music.play().catch(()=>{})});
+music.addEventListener('playing',()=>setTrackUI(currentPart,`Đang phát: ${PARTS[currentPart].label}`));
+music.addEventListener('waiting',()=>setTrackUI(currentPart,`Đang tải: ${PARTS[currentPart].label}`));
+music.addEventListener('canplay',()=>{if(audioOn&&music.paused)music.play().catch(()=>{})});
+music.addEventListener('error',()=>setTrackUI(currentPart,`Không tải được nhạc: ${PARTS[currentPart].label}`));
 
 audioBtn.addEventListener('click',()=>enableAudio(!audioOn));
 $('#fullBtn').addEventListener('click',async()=>{try{document.fullscreenElement?await document.exitFullscreen():await document.documentElement.requestFullscreen()}catch(e){}});
@@ -116,12 +91,11 @@ function render(){
  let nearest=0,best=Infinity,detectedPart=currentPart;
  scenes.forEach((sec,i)=>{
   const r=sec.getBoundingClientRect(),runway=Math.max(1,r.height-vh),p=clamp((-r.top)/runway);
-  const visible=r.bottom>0&&r.top<vh;
-  if(visible){const d=Math.abs(r.top);if(d<best){best=d;nearest=i;detectedPart=+sec.dataset.part||1}}
+  if(r.bottom>0&&r.top<vh){const d=Math.abs(r.top);if(d<best){best=d;nearest=i;detectedPart=+sec.dataset.part||1}}
   const layer=$('.layer',sec);
   if(layer){const depth=parseFloat(layer.dataset.depth||'.06');layer.style.transform=`translate3d(0,${(p-.5)*vh*depth}px,0) scale(1.045)`}
   const caption=$('[data-caption]',sec);
-  if(caption){const a=smooth((p-.14)/.28),exit=1-smooth((p-.79)/.16),op=a*exit;caption.style.opacity=op;const y=(1-a)*30+(1-exit)*-15;caption.style.transform=caption.classList.contains('center')?`translate(-50%,${y}px)`:`translateY(${y}px)`}
+  if(caption){const a=smooth((p-.14)/.28),exit=1-smooth((p-.79)/.16),y=(1-a)*30+(1-exit)*-15;caption.style.opacity=a*exit;caption.style.transform=caption.classList.contains('center')?`translate(-50%,${y}px)`:`translateY(${y}px)`}
   const phone=$('[data-phone]',sec);
   if(phone){const a=smooth((p-.07)/.25),b=1-smooth((p-.83)/.15);phone.style.opacity=a*b;phone.style.transform=`translate(-50%,-50%) rotate(${2-a*2}deg) scale(${.88+.12*a})`}
   const fade=$('[data-fade]',sec);
@@ -133,9 +107,9 @@ function render(){
  });
  currentScene=nearest;
  if(detectedPart!==currentPart){currentPart=detectedPart;setTrackUI(currentPart);if(audioOn)loadPartTrack(currentPart)}
- rafId=requestAnimationFrame(render);
+ requestAnimationFrame(render);
 }
-rafId=requestAnimationFrame(render);
+requestAnimationFrame(render);
 
 addEventListener('keydown',e=>{
  if($('#soundGate')&&!$('#soundGate').classList.contains('hidden'))return;
@@ -143,7 +117,6 @@ addEventListener('keydown',e=>{
  if(e.key==='ArrowUp'||e.key==='PageUp'){e.preventDefault();scenes[Math.max(0,currentScene-1)].scrollIntoView({behavior:'smooth'})}
  if(e.key.toLowerCase()==='m')enableAudio(!audioOn);
 });
-
 $$('img.photo').forEach(img=>img.addEventListener('error',()=>{img.style.display='none'}));
 audioBtn.setAttribute('aria-pressed','false');
 setTrackUI(1);
